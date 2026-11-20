@@ -2,6 +2,12 @@ package com.example.device
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -15,15 +21,36 @@ import com.example.model.SathiVoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class VoiceController(context: Context) {
     private val appContext = context.applicationContext
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var speechRecognizer: SpeechRecognizer? = null
+
+    private var mediaPlayer: MediaPlayer? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
+    private var activeFocusRequest: AudioFocusRequest? = null
+    private var activeTempFile: File? = null
+
+    private data class PendingPlayback(
+        val file: File,
+        val cleanText: String,
+        val loudBoost: Boolean
+    )
+
+    private val pendingBoostedFiles = ConcurrentHashMap<String, PendingPlayback>()
+
+    private val mediaAudioAttributes: AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
 
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
@@ -41,18 +68,31 @@ class VoiceController(context: Context) {
         tts = TextToSpeech(appContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 ttsReady = true
+                tts?.setAudioAttributes(mediaAudioAttributes)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
-                        _isSpeaking.value = true
+                        if (utteranceId == null || !pendingBoostedFiles.containsKey(utteranceId)) {
+                            _isSpeaking.value = true
+                        }
                     }
 
                     override fun onDone(utteranceId: String?) {
-                        _isSpeaking.value = false
+                        val pending = utteranceId?.let { pendingBoostedFiles.remove(it) }
+                        if (pending != null && pending.file.exists() && pending.file.length() > 44L) {
+                            playSynthesizedFileLoudly(pending.file, pending.loudBoost)
+                        } else {
+                            pending?.file?.delete()
+                            _isSpeaking.value = false
+                            abandonAudioFocus()
+                        }
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
+                        val pending = utteranceId?.let { pendingBoostedFiles.remove(it) }
+                        pending?.file?.delete()
                         _isSpeaking.value = false
+                        abandonAudioFocus()
                     }
                 })
             } else {
@@ -173,12 +213,15 @@ class VoiceController(context: Context) {
         text: String,
         language: AppLanguage,
         voice: SathiVoice,
-        mood: MoodTone
+        mood: MoodTone,
+        speechSpeed: Float = 1.12f,
+        loudCinemaVoice: Boolean = true
     ) {
         val engine = tts ?: return
         if (!ttsReady || text.isBlank()) return
 
-        // Clean demo tag brackets so spoken output sounds sweet and natural
+        stopSpeaking()
+
         val cleanText = text
             .replace(Regex("\\[.*?]"), "")
             .trim()
@@ -195,33 +238,92 @@ class VoiceController(context: Context) {
             engine.setLanguage(Locale.US)
         }
 
-        applySyntheticVoiceProfile(engine, targetLocale, voice, mood)
+        engine.setAudioAttributes(mediaAudioAttributes)
+        applySyntheticVoiceProfile(engine, targetLocale, voice, mood, speechSpeed)
+        requestAudioFocus()
+
+        if (loudCinemaVoice) {
+            ensureCinemaMediaVolume()
+        }
+
+        val utteranceId = UUID.randomUUID().toString()
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+        }
+
         _isSpeaking.value = true
-        engine.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+
+        if (loudCinemaVoice) {
+            val outFile = File(appContext.cacheDir, "sathi_tts_$utteranceId.wav")
+            pendingBoostedFiles[utteranceId] = PendingPlayback(
+                file = outFile,
+                cleanText = cleanText,
+                loudBoost = true
+            )
+            val synthResult = engine.synthesizeToFile(cleanText, params, outFile, utteranceId)
+            if (synthResult == TextToSpeech.SUCCESS) {
+                return
+            }
+            pendingBoostedFiles.remove(utteranceId)
+            outFile.delete()
+        }
+
+        engine.speak(cleanText, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
-    fun previewVoice(voice: SathiVoice, language: AppLanguage) {
+    fun previewVoice(
+        voice: SathiVoice,
+        language: AppLanguage,
+        speechSpeed: Float = 1.12f,
+        loudCinemaVoice: Boolean = true
+    ) {
         val sample = when (voice) {
             SathiVoice.FEMALE_MISTY -> if (language == AppLanguage.BENGALI) {
-                "নমস্কার, আমি মিষ্টি। আপনার সাথী হিসেবে সবসময় পাশে আছি।"
+                "নমস্কার, আমি মিষ্টি! এখন কি আমার কণ্ঠ একদম স্পষ্ট আর জোরে শুনতে পাচ্ছেন?"
             } else {
-                "Hello! I am Misty, your warm companion voice in Sathi."
+                "Hello! I am Misty! My voice is now loud, crisp, and clear like cinema audio."
             }
 
             SathiVoice.MALE_AYAN -> if (language == AppLanguage.BENGALI) {
-                "হ্যালো, আমি অয়ন। শান্ত ও আন্তরিক কণ্ঠে আপনার সাথে কথা বলব।"
+                "হ্যালো, আমি অয়ন! এখন জোরে, প্রাণবন্ত ও পরিষ্কার কণ্ঠে আপনার সাথে কথা বলব।"
             } else {
-                "Hi there! I am Ayan, your calm and friendly voice in Sathi."
+                "Hi there! I am Ayan, speaking loudly and clearly right from your speaker."
             }
         }
-        speak(sample, language, voice, MoodTone.WARM)
+        speak(sample, language, voice, MoodTone.WARM, speechSpeed, loudCinemaVoice)
     }
 
     fun stopSpeaking() {
+        pendingBoostedFiles.values.forEach { it.file.delete() }
+        pendingBoostedFiles.clear()
+
+        try {
+            loudnessEnhancer?.enabled = false
+            loudnessEnhancer?.release()
+        } catch (_: Exception) {
+        }
+        loudnessEnhancer = null
+
+        try {
+            mediaPlayer?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            mediaPlayer?.release()
+        } catch (_: Exception) {
+        }
+        mediaPlayer = null
+
+        activeTempFile?.delete()
+        activeTempFile = null
+
         try {
             tts?.stop()
         } catch (_: Exception) {
         }
+
+        abandonAudioFocus()
         _isSpeaking.value = false
     }
 
@@ -230,8 +332,8 @@ class VoiceController(context: Context) {
             speechRecognizer?.destroy()
         } catch (_: Exception) {
         }
+        stopSpeaking()
         try {
-            tts?.stop()
             tts?.shutdown()
         } catch (_: Exception) {
         }
@@ -239,38 +341,143 @@ class VoiceController(context: Context) {
         tts = null
     }
 
+    private fun playSynthesizedFileLoudly(file: File, loudBoost: Boolean) {
+        try {
+            val player = MediaPlayer().apply {
+                setAudioAttributes(mediaAudioAttributes)
+                setDataSource(file.absolutePath)
+                setVolume(1.0f, 1.0f)
+                prepare()
+            }
+            activeTempFile = file
+            mediaPlayer = player
+
+            if (loudBoost) {
+                try {
+                    val enhancer = LoudnessEnhancer(player.audioSessionId).apply {
+                        setTargetGain(1100) // +11 dB movie-speaker clarity boost
+                        enabled = true
+                    }
+                    loudnessEnhancer = enhancer
+                } catch (e: Exception) {
+                    Log.w(TAG, "LoudnessEnhancer unavailable on this device: ${e.message}")
+                }
+            }
+
+            player.setOnCompletionListener {
+                cleanupPlaybackOnly()
+            }
+            player.setOnErrorListener { _, _, _ ->
+                cleanupPlaybackOnly()
+                true
+            }
+            _isSpeaking.value = true
+            player.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed boosted MediaPlayer playback", e)
+            file.delete()
+            cleanupPlaybackOnly()
+        }
+    }
+
+    private fun cleanupPlaybackOnly() {
+        try {
+            loudnessEnhancer?.enabled = false
+            loudnessEnhancer?.release()
+        } catch (_: Exception) {
+        }
+        loudnessEnhancer = null
+
+        try {
+            mediaPlayer?.release()
+        } catch (_: Exception) {
+        }
+        mediaPlayer = null
+
+        activeTempFile?.delete()
+        activeTempFile = null
+        abandonAudioFocus()
+        _isSpeaking.value = false
+    }
+
+    private fun ensureCinemaMediaVolume() {
+        try {
+            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val targetFloor = (maxVol * 0.85f).toInt().coerceAtLeast(1)
+            if (currentVol < targetFloor) {
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetFloor, 0)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not adjust media volume floor: ${e.message}")
+        }
+    }
+
+    private fun requestAudioFocus() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(mediaAudioAttributes)
+                    .build()
+                activeFocusRequest = req
+                audioManager.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                )
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                activeFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+                activeFocusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(null)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private fun applySyntheticVoiceProfile(
         engine: TextToSpeech,
         locale: Locale,
         voice: SathiVoice,
-        mood: MoodTone
+        mood: MoodTone,
+        speechSpeed: Float
     ) {
         val basePitch = when (voice) {
-            SathiVoice.FEMALE_MISTY -> 1.14f
-            SathiVoice.MALE_AYAN -> 0.84f
+            SathiVoice.FEMALE_MISTY -> 1.12f
+            SathiVoice.MALE_AYAN -> 0.86f
         }
         val baseRate = when (voice) {
-            SathiVoice.FEMALE_MISTY -> 0.98f
-            SathiVoice.MALE_AYAN -> 0.95f
+            SathiVoice.FEMALE_MISTY -> speechSpeed
+            SathiVoice.MALE_AYAN -> (speechSpeed - 0.03f).coerceAtLeast(0.85f)
         }
 
         val moodPitchOffset = when (mood) {
-            MoodTone.JOYFUL -> 0.07f
-            MoodTone.COMFORTING -> -0.05f
-            MoodTone.SERIOUS -> -0.03f
+            MoodTone.JOYFUL -> 0.06f
+            MoodTone.COMFORTING -> -0.04f
+            MoodTone.SERIOUS -> -0.02f
             MoodTone.WARM -> 0f
         }
         val moodRateOffset = when (mood) {
             MoodTone.JOYFUL -> 0.05f
-            MoodTone.COMFORTING -> -0.09f
-            MoodTone.SERIOUS -> -0.04f
+            MoodTone.COMFORTING -> -0.04f
+            MoodTone.SERIOUS -> -0.02f
             MoodTone.WARM -> 0f
         }
 
         engine.setPitch((basePitch + moodPitchOffset).coerceIn(0.65f, 1.45f))
-        engine.setSpeechRate((baseRate + moodRateOffset).coerceIn(0.75f, 1.25f))
+        engine.setSpeechRate((baseRate + moodRateOffset).coerceIn(0.80f, 1.60f))
 
-        // Select matching system synthetic voice if available for the locale
         try {
             val matching = engine.voices
                 ?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }

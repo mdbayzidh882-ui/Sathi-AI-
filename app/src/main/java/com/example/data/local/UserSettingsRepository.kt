@@ -34,6 +34,8 @@ class UserSettingsRepository(private val context: Context) {
         val OFFLINE_WIFI_ONLY = booleanPreferencesKey("offline_wifi_only")
         val OFFLINE_MODE_FORCED = booleanPreferencesKey("offline_mode_forced")
         val USER_NAME = stringPreferencesKey("user_name")
+        val SPEECH_SPEED = androidx.datastore.preferences.core.floatPreferencesKey("speech_speed")
+        val LOUD_CINEMA_VOICE = booleanPreferencesKey("loud_cinema_voice")
     }
 
     val settingsFlow: Flow<UserSettings> = context.sathiDataStore.data.map { prefs ->
@@ -59,7 +61,9 @@ class UserSettingsRepository(private val context: Context) {
             offlineDownloadProgress = prefs[Keys.OFFLINE_PROGRESS] ?: 0,
             offlineWifiOnly = prefs[Keys.OFFLINE_WIFI_ONLY] ?: true,
             offlineModeForced = prefs[Keys.OFFLINE_MODE_FORCED] ?: false,
-            userName = prefs[Keys.USER_NAME] ?: ""
+            userName = prefs[Keys.USER_NAME] ?: "",
+            speechSpeed = (prefs[Keys.SPEECH_SPEED] ?: 1.12f).coerceIn(0.85f, 1.50f),
+            loudCinemaVoice = prefs[Keys.LOUD_CINEMA_VOICE] ?: true
         )
     }
 
@@ -114,6 +118,14 @@ class UserSettingsRepository(private val context: Context) {
 
     suspend fun setUserName(name: String) {
         context.sathiDataStore.edit { it[Keys.USER_NAME] = name }
+    }
+
+    suspend fun setSpeechSpeed(speed: Float) {
+        context.sathiDataStore.edit { it[Keys.SPEECH_SPEED] = speed.coerceIn(0.85f, 1.50f) }
+    }
+
+    suspend fun setLoudCinemaVoice(enabled: Boolean) {
+        context.sathiDataStore.edit { it[Keys.LOUD_CINEMA_VOICE] = enabled }
     }
 
     suspend fun clearAllUserPreferences() {

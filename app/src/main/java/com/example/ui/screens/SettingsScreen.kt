@@ -64,6 +64,8 @@ fun SettingsScreen(
     onSetLanguage: (AppLanguage) -> Unit,
     onSetVoice: (SathiVoice) -> Unit,
     onPreviewVoice: (SathiVoice) -> Unit,
+    onSetSpeechSpeed: (Float) -> Unit,
+    onSetLoudCinemaVoice: (Boolean) -> Unit,
     onRedeemCode: (String) -> Unit,
     onResetPlan: () -> Unit,
     onStartOfflineDownload: (OfflinePackVariant) -> Unit,
@@ -240,6 +242,45 @@ fun SettingsScreen(
                             onSelect = { onSetVoice(SathiVoice.MALE_AYAN) },
                             onPreview = { onPreviewVoice(SathiVoice.MALE_AYAN) }
                         )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isBn) "সিনেমা-লাউড স্পিকার বুস্ট (+১১ dB)" else "Cinema-Loud Speaker Boost (+11 dB)",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = if (isBn) "সিনেমার মতো জোরে ও স্পষ্ট আওয়াজ" else "Projects voice loudly through phone speaker",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = settings.loudCinemaVoice,
+                                onCheckedChange = onSetLoudCinemaVoice,
+                                modifier = Modifier.testTag("loud_cinema_voice_switch")
+                            )
+                        }
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            val speedPct = String.format(java.util.Locale.US, "%.2fx", settings.speechSpeed)
+                            Text(
+                                text = if (isBn) "কথা বলার গতি: $speedPct" else "Voice Speed: $speedPct",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            androidx.compose.material3.Slider(
+                                value = settings.speechSpeed,
+                                onValueChange = onSetSpeechSpeed,
+                                valueRange = 0.85f..1.50f,
+                                modifier = Modifier.testTag("speech_speed_slider")
+                            )
+                        }
                     }
                 }
             }

@@ -94,5 +94,7 @@ data class UserSettings(
     val offlineDownloadProgress: Int = 0,
     val offlineWifiOnly: Boolean = true,
     val offlineModeForced: Boolean = false,
-    val userName: String = ""
+    val userName: String = "",
+    val speechSpeed: Float = 1.12f,
+    val loudCinemaVoice: Boolean = true
 )

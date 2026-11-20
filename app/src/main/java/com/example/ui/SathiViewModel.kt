@@ -265,7 +265,9 @@ class SathiViewModel(application: Application) : AndroidViewModel(application) {
                     text = result.text,
                     language = lang,
                     voice = current.settings.voice,
-                    mood = result.mood
+                    mood = result.mood,
+                    speechSpeed = current.settings.speechSpeed,
+                    loudCinemaVoice = current.settings.loudCinemaVoice
                 )
             }
         }
@@ -446,7 +448,25 @@ class SathiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun previewVoice(voice: SathiVoice) {
-        voiceController.previewVoice(voice, uiState.value.settings.language)
+        val settings = uiState.value.settings
+        voiceController.previewVoice(
+            voice = voice,
+            language = settings.language,
+            speechSpeed = settings.speechSpeed,
+            loudCinemaVoice = settings.loudCinemaVoice
+        )
+    }
+
+    fun setSpeechSpeed(speed: Float) {
+        viewModelScope.launch {
+            settingsRepo.setSpeechSpeed(speed)
+        }
+    }
+
+    fun setLoudCinemaVoice(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepo.setLoudCinemaVoice(enabled)
+        }
     }
 
     fun redeemDemoCode(rawCode: String) {
