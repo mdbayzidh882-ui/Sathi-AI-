@@ -1,0 +1,6 @@
+{
+  "name": "Sathi",
+  "description": "Personal Bengali and English AI voice companion with live voice, web search, phone actions, memory, camera vision, plans, and offline mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

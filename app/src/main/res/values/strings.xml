@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Sathi</string>
+    <string name="app_name_bn">সাথী</string>
+    <string name="app_tagline">আপনার ব্যক্তিগত ভয়েস সাথী</string>
+    <string name="cd_sathi_orb">Sathi live voice assistant orb</string>
+    <string name="cd_sathi_avatar">Sathi companion emblem</string>
+    <string name="cd_send_message">Send message</string>
+    <string name="cd_camera_vision">Analyze photo with camera or gallery</string>
+    <string name="cd_mic_toggle">Start or interrupt voice conversation</string>
+    <string name="cd_back">Navigate back</string>
+    <string name="cd_flashlight">Toggle flashlight</string>
+    <string name="error_mic_permission">ভয়েস ব্যবহার করতে মাইক্রোফোন অনুমতি প্রয়োজন।</string>
+    <string name="error_camera_permission">ছবি তুলতে ক্যামেরা অনুমতি প্রয়োজন।</string>
+    <string name="error_no_internet">ইন্টারনেট সংযোগ নেই। অফলাইন মোডে কথা বলতে পারেন।</string>
+</resources>
